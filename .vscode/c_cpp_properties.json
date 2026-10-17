@@ -1,0 +1,42 @@
+{
+    "configurations": [
+        {
+            "name": "STM32",
+            "intelliSenseMode": "gcc-arm",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++17",
+            "compileCommands": "${workspaceFolder}/build/Debug/compile_commands.json",
+            "defines": [
+                "DEBUG",
+                "STM32F407xx",
+                "USE_HAL_DRIVER"
+            ],
+            "includePath": [
+                "${workspaceFolder}/Core/Inc",
+                "${workspaceFolder}/App/Inc",
+                "${workspaceFolder}/Config/Inc",
+                "${workspaceFolder}/Osal/Inc",
+                "${workspaceFolder}/Bsp/Inc",
+                "${workspaceFolder}/Service/Inc",
+                "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
+                "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc/Legacy",
+                "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F4xx/Include",
+                "${workspaceFolder}/Drivers/CMSIS/Include"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/Core/Inc",
+                    "${workspaceFolder}/App/Inc",
+                    "${workspaceFolder}/Config/Inc",
+                    "${workspaceFolder}/Osal/Inc",
+                    "${workspaceFolder}/Bsp/Inc",
+                    "${workspaceFolder}/Service/Inc",
+                    "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
+                    "${workspaceFolder}/Drivers/CMSIS/Include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}

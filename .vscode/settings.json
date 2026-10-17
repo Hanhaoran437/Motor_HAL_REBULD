@@ -1,0 +1,28 @@
+{
+    // ==== 可移植性说明：本文件不再写死任何“用户名 / 扩展版本号”的绝对路径 ====
+    "cmake.cmakePath": "cube-cmake",
+    "cmake.configureArgs": [
+        "-DCMAKE_COMMAND=cube-cmake"
+    ],
+    "cmake.preferredGenerators": [
+        "Ninja"
+    ],
+    // 故意不设置 C_Cpp.default.compilerPath：
+    // 编译器路径每台电脑都不一样（C:/Users/<用户名>/AppData/Local/stm32cube/bundles/...），
+    // IntelliSense 直接用 build/Debug/compile_commands.json（本机 CMake 生成，天然正确）。
+    // 确实需要时自己加一行，把 <用户名> 换掉：
+    // "C_Cpp.default.compilerPath": "C:/Users/<用户名>/AppData/Local/stm32cube/bundles/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc.exe",
+    "C_Cpp.default.intelliSenseMode": "gcc-arm",
+    "C_Cpp.default.cStandard": "gnu11",
+    "C_Cpp.default.defines": [
+        "DEBUG",
+        "STM32F407xx",
+        "USE_HAL_DRIVER"
+    ],
+    "stm32cube-ide-clangd.path": "cube",
+    "stm32cube-ide-clangd.arguments": [
+        "starm-clangd",
+        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc*",
+        "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-g++*"
+    ]
+}

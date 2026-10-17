@@ -1,0 +1,160 @@
+#include "motion.h"
+#include "bsp_motor_pulse.h"
+#include "osal.h"
+#include "cfg_motion.h"
+
+/* ============================================================================
+ * App 层 — 运动控制
+ *
+ * 分家规则（这是整个重构最核心的一刀）：
+ *   - 这一层知道"左前轮/右后轮/左转/右转"   → 留在本文件（App）
+ *   - 下层只知道"某一路通道 / PSC 分频 / EGR" → 在 Bsp/bsp_motor_pulse.c
+ *
+ * 本文件只允许通过 Bsp 的接口碰硬件：不许 include "tim.h"，不许 HAL_GPIO_WritePin。
+ *
+ * 速度模型：
+ *   s_speed_left / s_speed_right 记录"当前已下达"的左右速度（Hz，有符号）。
+ *   所有平滑动作都从这里当起点，所以调用者不需要传"从多少开始"。
+ * ============================================================================ */
+
+/* 车体语义 → Bsp 通道（这层映射本身就是 App 层的职责） */
+#define MOTION_CH_FL   MOTOR_CH_L1
+#define MOTION_CH_RL   MOTOR_CH_L2
+#define MOTION_CH_FR   MOTOR_CH_R1
+#define MOTION_CH_RR   MOTOR_CH_R2
+
+/* 左/右侧轮在车体上镜像安装，同一 DIR 电平下两侧转向相反 */
+#define MOTION_DIR_LEFT_FWD    MOTOR_DIR_CCW
+#define MOTION_DIR_LEFT_BWD    MOTOR_DIR_CW
+#define MOTION_DIR_RIGHT_FWD   MOTOR_DIR_CW
+#define MOTION_DIR_RIGHT_BWD   MOTOR_DIR_CCW
+
+/* S 曲线过渡每步的等待时间（固定 800ms 走完 100 段 = 8ms/段） */
+#define MOTION_SCURVE_STEP_MS   (CFG_SCURVE_TIME_MS / (CFG_SCURVE_POINTS - 1))
+
+/* ---------------------------------------------------------------------------
+ * S 曲线过渡表（101 点，0 ~ 1000 表示 0.0% ~ 100.0%）
+ *   本质为 cosine S 曲线: y(t) = (1-cos(pi*t))/2
+ *   加速度在两端为 0、中间最大，起点/终点速度无阶跃跳变，
+ *   避免 37cm 小车斜坡加速时更容易失步的问题。
+ * ------------------------------------------------------------------------ */
+static const u16 s_scurve_table[CFG_SCURVE_POINTS] = {
+      0,   0,   1,   2,   4,   6,   9,  12,  16,  20,
+     24,  30,  35,  41,  48,  54,  62,  70,  78,  86,
+     95, 105, 115, 125, 136, 146, 158, 169, 181, 194,
+    206, 219, 232, 245, 259, 273, 287, 301, 316, 331,
+    345, 361, 376, 391, 406, 422, 437, 453, 469, 484,
+    500, 516, 531, 547, 563, 578, 594, 609, 624, 639,
+    655, 669, 684, 699, 713, 727, 741, 755, 768, 781,
+    794, 806, 819, 831, 842, 854, 864, 875, 885, 895,
+    905, 914, 922, 930, 938, 946, 952, 959, 965, 970,
+    976, 980, 984, 988, 991, 994, 996, 998, 999, 1000,
+    1000
+};
+
+/* 当前已下达的左右速度（Hz，有符号）。改硬件的地方只有 Motion_Move()。 */
+static s32 s_speed_left  = 0;
+static s32 s_speed_right = 0;
+
+void Motion_Init(void)
+{
+    /* 时钟、GPIO、AF 复用、时基、PWM 通道全部由 CubeMX 生成代码完成，
+     * Bsp 只负责打开 4 个通道输出并保持两路定时器停止。 */
+    Bsp_MotorPulse_Init();
+
+    s_speed_left  = 0;
+    s_speed_right = 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * 底层：立即把左右速度写进硬件（不平滑）
+ *   v > 0 前进，v < 0 后退，v == 0 该侧停止
+ * ------------------------------------------------------------------------ */
+void Motion_Move(s32 vLeft, s32 vRight)
+{
+    u32 fl = (vLeft  < 0) ? (u32)(-vLeft)  : (u32)vLeft;
+    u32 fr = (vRight < 0) ? (u32)(-vRight) : (u32)vRight;
+
+    /* 先定方向（此时可能还在转，由 S 曲线保证过零前已减速） */
+    Bsp_MotorPulse_SetDir(MOTION_CH_FL, (vLeft  < 0) ? MOTION_DIR_LEFT_BWD  : MOTION_DIR_LEFT_FWD);
+    Bsp_MotorPulse_SetDir(MOTION_CH_RL, (vLeft  < 0) ? MOTION_DIR_LEFT_BWD  : MOTION_DIR_LEFT_FWD);
+    Bsp_MotorPulse_SetDir(MOTION_CH_FR, (vRight < 0) ? MOTION_DIR_RIGHT_BWD : MOTION_DIR_RIGHT_FWD);
+    Bsp_MotorPulse_SetDir(MOTION_CH_RR, (vRight < 0) ? MOTION_DIR_RIGHT_BWD : MOTION_DIR_RIGHT_FWD);
+
+    /* ⚠️ 顺序硬约束：必须先 StartAll() 再 SetFreq()。
+     * 因为 SetFreq(0) 会 HAL_TIM_Base_Stop() 掉整路时基；
+     * 若先 SetFreq 再 StartAll，会把本该停转的一侧用旧分频重新启动。 */
+    Bsp_MotorPulse_StartAll();
+    Bsp_MotorPulse_SetFreq(MOTION_CH_FL, fl);          /* 左侧（FL/RL 共用 TIM1） */
+    Bsp_MotorPulse_SetFreq(MOTION_CH_FR, fr);          /* 右侧（FR/RR 共用 TIM2） */
+
+    s_speed_left  = vLeft;
+    s_speed_right = vRight;
+}
+
+/* ---------------------------------------------------------------------------
+ * 内部：按 S 曲线从"当前速度"过渡到目标速度（阻塞，固定 CFG_SCURVE_TIME_MS）
+ *   已经在目标速度时不空转，直接返回。
+ * ------------------------------------------------------------------------ */
+static void Motion_RampTo(s32 vLeftTo, s32 vRightTo)
+{
+    u32 i;
+    /* 必须先快照：循环里 Motion_Move() 会改写 s_speed_*，不能拿它当起点 */
+    const s32 leftFrom  = s_speed_left;
+    const s32 rightFrom = s_speed_right;
+
+    if ((vLeftTo == leftFrom) && (vRightTo == rightFrom))
+    {
+        return;
+    }
+
+    for (i = 1; i < CFG_SCURVE_POINTS; i++)
+    {
+        s32 vl = leftFrom  + ((vLeftTo  - leftFrom)  * (s32)s_scurve_table[i]) / 1000;
+        s32 vr = rightFrom + ((vRightTo - rightFrom) * (s32)s_scurve_table[i]) / 1000;
+        Motion_Move(vl, vr);
+        Osal_DelayMs(MOTION_SCURVE_STEP_MS);
+    }
+
+    Motion_Move(vLeftTo, vRightTo);                    /* 精确落到目标值 */
+}
+
+/* ---------------------------------------------------------------------------
+ * ① 转弯 / 差速：左轮 vLeft、右轮 vRight（Hz，有符号）
+ *   vLeft > vRight → 右转     vRight > vLeft → 左转     相等 → 直行
+ *   负数表示该轮反转，例如 Motion_Steer(-2500, 2500) 就是原地左转。
+ * ------------------------------------------------------------------------ */
+void Motion_Steer(s32 vLeft, s32 vRight, u32 holdMs)
+{
+    Motion_RampTo(vLeft, vRight);
+
+    if (holdMs > 0)
+    {
+        Osal_DelayMs(holdMs);                          /* 到达目标后保持 */
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * ① 进退：speed > 0 前进、< 0 后退、== 0 停止，左右同速（直线）
+ * ------------------------------------------------------------------------ */
+void Motion_Drive(s32 speed, u32 holdMs)
+{
+    Motion_Steer(speed, speed, holdMs);
+}
+
+/* ---------------------------------------------------------------------------
+ * ① 停车：两侧 S 曲线降到 0
+ * ------------------------------------------------------------------------ */
+void Motion_Brake(void)
+{
+    Motion_Steer(0, 0, 0);
+}
+
+/* ---------------------------------------------------------------------------
+ * ② 底层：读回当前已下达的速度（Hz，有符号），便于调试时观察
+ * ------------------------------------------------------------------------ */
+void Motion_GetSpeed(s32 *vLeft, s32 *vRight)
+{
+    if (vLeft  != 0) { *vLeft  = s_speed_left;  }
+    if (vRight != 0) { *vRight = s_speed_right; }
+}

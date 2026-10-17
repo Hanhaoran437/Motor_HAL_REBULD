@@ -1,0 +1,107 @@
+{
+    // 编译任务：F5 调试前会自动跑 "build-debug"
+    // 这里故意不再写死 cube.exe 的绝对路径（形如 C:/Users/某某/... 的路径换台电脑就失效），
+    // 改为调用同目录下的 cube-task.ps1：它自己去找 cube.exe，并且
+    //   - build 前若还没有 build/<Preset> 缓存，先自动 configure；
+    //   - 若发现 build/<Preset>/CMakeCache.txt 是别的电脑/别的目录生成的
+    //     （CMAKE_HOME_DIRECTORY 和当前工作区不一致），自动删掉重配，
+    //     避免 “The current CMakeCache.txt directory ... is different than ...”
+    //     / “The source ... does not match the source ... used to generate cache”。
+    // 这样别人把整个工作区解压到任意目录/任意用户名下都能直接 F5。
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-debug",
+            "detail": "cube-task.ps1 -Action build -Preset Debug（必要时自动配置 / 自动清理旧缓存）",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/cube-task.ps1",
+                "-Action",
+                "build",
+                "-Preset",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "build-release",
+            "detail": "cube-task.ps1 -Action build -Preset Release",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/cube-task.ps1",
+                "-Action",
+                "build",
+                "-Preset",
+                "Release"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "configure-debug",
+            "detail": "重新生成 build/Debug（换电脑/挪目录后跑一次；一般 F5 时已自动处理）",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/cube-task.ps1",
+                "-Action",
+                "configure",
+                "-Preset",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "clean-debug",
+            "detail": "删除 build/Debug（缓存彻底乱掉时的逃生通道）",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "${workspaceFolder}/.vscode/cube-task.ps1",
+                "-Action",
+                "clean",
+                "-Preset",
+                "Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

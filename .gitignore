@@ -1,0 +1,68 @@
+# =====================================================================
+#  STM32 + CMake 工程 .gitignore
+#  原则：只提交「源码 + 工程配置」，不提交本机生成物。
+#  这个文件是为「上传 GitHub 给同事继续开发」准备的。
+# =====================================================================
+
+# ---- 构建输出（CMake / Ninja）--------------------------------------
+#  build\Debug\CMakeCache.txt 里记着生成它的绝对路径（盘符 + 用户名），
+#  换台电脑必然对不上；cube-task.ps1 会自己发现并清理重建，所以不用提交。
+build/
+out/
+cmake-build-*/
+
+# ---- 编译中间产物与固件 -------------------------------------------
+#  注意：故意不写 *.s —— 启动文件 startup_stm32f407xx.s 必须提交！
+*.o
+*.obj
+*.d
+*.su
+*.map
+*.elf
+*.bin
+*.hex
+*.lst
+
+# OpenOCD 自带的板级固件（跟 STM32 无关，但保持这个包完整，别被上面的 *.bin/*.hex 误伤）
+!tools/openocd/**/*.bin
+!tools/openocd/**/*.hex
+
+# ---- 调试 / 工具产生的日志 ----------------------------------------
+gdbClient_log.txt
+*.log
+
+# ---- clangd / IntelliSense 缓存 -----------------------------------
+.cache/
+compile_commands.json
+
+# ---- IDE、个人配置等不该进仓库的东西 -----------------------------
+.vscode/ipch/
+.vscode/browse.vc.db*
+CMakeUserPresets.json
+.idea/
+*.swp
+*~
+
+# ---- Windows 系统垃圾文件 -----------------------------------------
+Thumbs.db
+Desktop.ini
+
+# =====================================================================
+#  下面这些是「必须提交」的，别误伤（留档说明用，实际不需要写规则）：
+#    .settings/                    工程需要的工具链 bundle 清单
+#    .vscode/launch.json           调试配置（已做成跨机器可移植）
+#    .vscode/tasks.json            编译任务
+#    .vscode/cube-task.ps1         找 cube.exe + 自动清理旧构建缓存
+#    .vscode/settings.json         CMake / clangd 配置
+#    .vscode/c_cpp_properties.json IntelliSense 配置
+#    .vscode/STM32F407.svd         调试时看寄存器用
+#    .mxproject / *.ioc            CubeMX 工程配置
+#    CMakeLists.txt / CMakePresets.json / cmake/ / Core/ / App/ /
+#    Bsp/ / Config/ / Osal/ / Service/ / Drivers/ / startup_*.s / *.ld
+#
+#  tools/openocd/  （xPack OpenOCD 0.12.0+dev，约 7.6 MB）
+#    目前「提交」：同事 clone 完就能直接 F5 调试，开箱即用。
+#    如果你不想让仓库带这个二进制，就取消下面两行的注释，
+#    并在 README 里告诉同事先跑 tools/get-openocd.ps1 下载。
+# tools/openocd/
+# =====================================================================

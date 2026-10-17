@@ -1,0 +1,133 @@
+{
+    // ============================================================================
+    // STM32Cube for VS Code + 正点原子 ATK-HSWLDBG 无线调试器（CMSIS-DAP）调试配置
+    //                               —— 可移植版（工作区打包给别人解压即可用）
+    //
+    // 三者分工：
+    //   1. 无线调试器的 USB 接收器  -> 电脑识别为一个标准 CMSIS-DAP 探针（HID）
+    //   2. OpenOCD                  -> GDB Server，把 CMSIS-DAP 翻译成 GDB 远程协议
+    //   3. STM32Cube 扩展的 "Generic GDB Server"（type: stgdbtarget）
+    //                               -> VS Code 里的调试前端（断点/变量/寄存器/SVD 外设视图）
+    //
+    // 注意：ST 官方扩展本身只支持 ST-LINK / J-Link，CMSIS-DAP 必须走 stgdbtarget 这个
+    //       "STM32Cube: STM32 Launch GDB" 通用 GDB Server 类型（本文件就是这么配的）。
+    //
+    // 可移植性：本文件不再写死任何“用户名 / 扩展版本号 / winget 安装路径”，
+    //          别人拿到这个工作区只需要准备两样东西：
+    //          (1) VS Code + 扩展 “STM32Cube for VS Code”（自带 gcc/cmake/ninja/gdb）
+    //          (2) OpenOCD 放在 <工作区>/tools/openocd/ 下
+    //              即必须存在 <工作区>/tools/openocd/bin/openocd.exe
+    //              （OpenOCD 的 scripts/ 要和 bin/ 平级；xpack 包解压后就是这个结构）
+    //              如果你把 OpenOCD 装在别处，只需改下面 serverCwd 一行。
+    //
+    // 使用流程：改完代码 -> F5 选 “无线调试器：下载并调试” 即可
+    //          （preLaunchTask=build-debug 会先自动配置+编译，见 tasks.json）
+    // ============================================================================
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // 最常用：编译好的 elf 下载进 Flash，复位后停在 main 函数
+            "name": "无线调试器：下载并调试（OpenOCD + CMSIS-DAP）",
+            "type": "stgdbtarget",
+            "request": "launch",
+            "origin": "snippet",
+            "cwd": "${workspaceFolder}",
+
+            // F5 之前先跑 tasks.json 里的 build-debug（内部调 cube-task.ps1：
+            // 自动找 cube.exe、必要时自动 configure、自动清理别的电脑留下的旧缓存）。
+            // 编译报错时不会进入调试，改完错再按 F5 即可。
+            "preLaunchTask": "build-debug",
+
+            // 扩展自带的 preBuild 步骤关掉（空字符串），避免重复/无效构建。
+            // 若想改用扩展的 STM32Cube Build，可改成 "${command:st-stm32-ide-debug-launch.build}"。
+            "preBuild": "",
+
+            // 调试符号 + 要烧录的镜像（同一个 elf）
+            "program": "${workspaceFolder}/build/Debug/Motor_HAL_REBULD.elf",
+
+            // ST 扩展自带的 arm-none-eabi-gdb：用官方 command 变量取，
+            // 换电脑/换扩展版本都不用改。万一你的环境解析不到这个变量，
+            // 就删掉本行、换成自己机器上的绝对路径，例如：
+            // "gdb": "C:/Users/<用户名>/AppData/Local/stm32cube/bundles/gnu-gdb-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gdb.exe",
+            "gdb": "${command:st-stm32-ide-debug-launch.get-gdb-executable}",
+
+            // 器件信息：从 CMSIS pack（STM32F4xx DFP）里查外设寄存器用
+            "deviceName": "STM32F407ZGT6",
+            "deviceCore": "Cortex-M4",
+            "svdPath": "${workspaceFolder}/.vscode/STM32F407.svd",
+
+            // ---- GDB Server = OpenOCD（工作区相对路径，整个工作区拷到哪都能用）----
+            // serverExe 必须是相对 serverCwd 的可执行文件名，扩展内部是 join(serverCwd, serverExe)；
+            // 且是用 spawn 直接拉起的，所以不能用 .cmd / .bat 包装脚本。
+            "serverExe": "openocd.exe",
+            "serverCwd": "${workspaceFolder}/tools/openocd/bin",
+            // interface/cmsis-dap.cfg   = 用 CMSIS-DAP 探针（无线调试器的接收器）
+            // adapter speed 1000        = 1MHz，无线链路先慢一点更稳
+            // target/stm32f4x.cfg       = STM32F4 系列目标
+            // 若 OpenOCD 扫不到探针（报 no CMSIS-DAP device found），把下面这行加进去，
+            // 指定正点原子接收器的 VID/PID：
+            //     "-c", "cmsis_dap_vid_pid 0x04d8 0x00df",
+            "serverParameters": [
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-c",
+                "adapter speed 1000",
+                "-f",
+                "target/stm32f4x.cfg"
+            ],
+            "serverHost": "localhost",
+            "serverPort": "3333",
+            // 扩展在 serverPort + serverParameters 同时给出时只按这个延时等待，
+            // 不解析 OpenOCD 的 "Listening on port" 日志，给 1.5s 足够
+            "serverStartupDelay": 1500,
+
+            // 烧录：只有配置了 imagesAndSymbols，扩展才会给 GDB 发 load 命令
+            // （只写 program 的话只加载符号、不烧 Flash）
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/build/Debug/Motor_HAL_REBULD.elf",
+                    "imageOffset": "",
+                    "symbolFileName": "${workspaceFolder}/build/Debug/Motor_HAL_REBULD.elf",
+                    "symbolOffset": ""
+                }
+            ],
+
+            // 复位后运行到 main 停住；改成 "reset" 则停在复位向量
+            "runEntry": "main",
+
+            // 裸机工程不需要 RTOS 代理，关掉避免多起一个进程
+            "serverRtos": {
+                "enabled": false
+            }
+        },
+        {
+            // 板子上已经在跑固件（不重新烧录），只连上去看变量/打断点
+            "name": "无线调试器：仅连接（不烧录）",
+            "type": "stgdbtarget",
+            "request": "attach",
+            "origin": "snippet",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/Debug/Motor_HAL_REBULD.elf",
+            "gdb": "${command:st-stm32-ide-debug-launch.get-gdb-executable}",
+            "deviceName": "STM32F407ZGT6",
+            "deviceCore": "Cortex-M4",
+            "svdPath": "${workspaceFolder}/.vscode/STM32F407.svd",
+            "serverExe": "openocd.exe",
+            "serverCwd": "${workspaceFolder}/tools/openocd/bin",
+            "serverParameters": [
+                "-f",
+                "interface/cmsis-dap.cfg",
+                "-c",
+                "adapter speed 1000",
+                "-f",
+                "target/stm32f4x.cfg"
+            ],
+            "serverHost": "localhost",
+            "serverPort": "3333",
+            "serverStartupDelay": 1500,
+            "serverRtos": {
+                "enabled": false
+            }
+        }
+    ]
+}
