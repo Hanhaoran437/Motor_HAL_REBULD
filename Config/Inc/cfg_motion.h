@@ -1,14 +1,16 @@
 #ifndef CFG_MOTION_H
 #define CFG_MOTION_H
 
-/* 线性斜坡 */
-#define CFG_RAMP_START_HZ   100
-#define CFG_RAMP_STEP_HZ    20
-#define CFG_RAMP_STEP_MS    15
+/* S 曲线变速参数 */
 
-/* S 曲线 */
-#define CFG_SCURVE_START_HZ 50
-#define CFG_SCURVE_TIME_MS  800
+/* 加速度（Hz/s）。变速时长 = |目标速度 - 当前速度| / 该值。
+ * 2000 == "1000Hz 用 500ms"，也就是每毫秒加 2Hz。
+ * 例：0 → 2500Hz 需 1250ms；2500 → -2500Hz（跨 5000Hz）需 2500ms。
+ * 运行时可改，不用重编译：Motion_SetAccel(hzPerSec)。 */
+#define CFG_SCURVE_ACCEL_HZ_PER_S  2000
+
 #define CFG_SCURVE_POINTS   101     /* 表长固定 101，改了两边都要改 */
+#define CFG_SCURVE_SAMPLE_MS  8     /* 采样间隔：每 8ms 更新一次输出速度 */
+#define CFG_SCURVE_MIN_MS    20     /* 变速时长下限，防止微小速度差也走长流程 */
 
 #endif /* CFG_MOTION_H */

@@ -29,9 +29,6 @@
 #define MOTION_DIR_RIGHT_FWD   MOTOR_DIR_CW
 #define MOTION_DIR_RIGHT_BWD   MOTOR_DIR_CCW
 
-/* S 曲线过渡每步的等待时间（固定 800ms 走完 100 段 = 8ms/段） */
-#define MOTION_SCURVE_STEP_MS   (CFG_SCURVE_TIME_MS / (CFG_SCURVE_POINTS - 1))
-
 /* ---------------------------------------------------------------------------
  * S 曲线过渡表（101 点，0 ~ 1000 表示 0.0% ~ 100.0%）
  *   本质为 cosine S 曲线: y(t) = (1-cos(pi*t))/2
@@ -55,6 +52,10 @@ static const u16 s_scurve_table[CFG_SCURVE_POINTS] = {
 /* 当前已下达的左右速度（Hz，有符号）。改硬件的地方只有 Motion_Move()。 */
 static s32 s_speed_left  = 0;
 static s32 s_speed_right = 0;
+
+/* 当前加速度（Hz/s）。S 曲线变速时长 = |速度差| / s_accel_hz_per_s。
+ * 默认 2000 == "1000Hz 用 500ms"；运行时可调，见 Motion_SetAccel()。 */
+static u32 s_accel_hz_per_s = CFG_SCURVE_ACCEL_HZ_PER_S;
 
 void Motion_Init(void)
 {
@@ -93,27 +94,55 @@ void Motion_Move(s32 vLeft, s32 vRight)
 }
 
 /* ---------------------------------------------------------------------------
- * 内部：按 S 曲线从"当前速度"过渡到目标速度（阻塞，固定 CFG_SCURVE_TIME_MS）
- *   已经在目标速度时不空转，直接返回。
+ * 内部：按 S 曲线从"当前速度"过渡到目标速度（阻塞）
+ *
+ *   变速时长由加速度推出：durationMs = max(|Δ左|, |Δ右|) × 1000 / 加速度
+ *   取两侧中变化更大的一侧，保证哪一轮都不超过设定的加速度上限；
+ *   两侧共用同一条进度曲线，所以差速转向时左右轮同时到位、轨迹不会歪。
+ *
+ *   进度按"真实经过时间"算（Osal_GetTickMs），不是数循环次数，
+ *   所以 DelayMs 的抖动不会累积成时长误差。
  * ------------------------------------------------------------------------ */
 static void Motion_RampTo(s32 vLeftTo, s32 vRightTo)
 {
-    u32 i;
     /* 必须先快照：循环里 Motion_Move() 会改写 s_speed_*，不能拿它当起点 */
     const s32 leftFrom  = s_speed_left;
     const s32 rightFrom = s_speed_right;
+    const s32 dLeft     = vLeftTo  - leftFrom;
+    const s32 dRight    = vRightTo - rightFrom;
+    u32 span, durationMs, t0, elapsed, idx;
 
-    if ((vLeftTo == leftFrom) && (vRightTo == rightFrom))
+    if ((dLeft == 0) && (dRight == 0))
     {
-        return;
+        return;                                        /* 已在目标速度，不空转 */
     }
 
-    for (i = 1; i < CFG_SCURVE_POINTS; i++)
+    span = (u32)((dLeft  < 0) ? -dLeft  : dLeft);
+    if ((u32)((dRight < 0) ? -dRight : dRight) > span)
     {
-        s32 vl = leftFrom  + ((vLeftTo  - leftFrom)  * (s32)s_scurve_table[i]) / 1000;
-        s32 vr = rightFrom + ((vRightTo - rightFrom) * (s32)s_scurve_table[i]) / 1000;
-        Motion_Move(vl, vr);
-        Osal_DelayMs(MOTION_SCURVE_STEP_MS);
+        span = (u32)((dRight < 0) ? -dRight : dRight);
+    }
+
+    durationMs = (span * 1000UL) / s_accel_hz_per_s;
+    if (durationMs < CFG_SCURVE_MIN_MS)
+    {
+        durationMs = CFG_SCURVE_MIN_MS;
+    }
+
+    t0 = Osal_GetTickMs();
+    for (;;)
+    {
+        elapsed = Osal_GetTickMs() - t0;
+        if (elapsed >= durationMs)
+        {
+            break;
+        }
+
+        idx = (elapsed * (CFG_SCURVE_POINTS - 1)) / durationMs;
+        Motion_Move(leftFrom  + ((vLeftTo  - leftFrom)  * (s32)s_scurve_table[idx]) / 1000,
+                    rightFrom + ((vRightTo - rightFrom) * (s32)s_scurve_table[idx]) / 1000);
+
+        Osal_DelayMs(CFG_SCURVE_SAMPLE_MS);
     }
 
     Motion_Move(vLeftTo, vRightTo);                    /* 精确落到目标值 */
@@ -157,4 +186,26 @@ void Motion_GetSpeed(s32 *vLeft, s32 *vRight)
 {
     if (vLeft  != 0) { *vLeft  = s_speed_left;  }
     if (vRight != 0) { *vRight = s_speed_right; }
+}
+
+/* ---------------------------------------------------------------------------
+ * ③ 加速度：修改"多快达到目标速度"，对所有后续 S 曲线变速立即生效
+ *   hzPerSec = 2000  → 1000Hz 用 500ms（默认值）
+ *   hzPerSec = 4000  → 变速快一倍（0 → 2500Hz 用 625ms）
+ *   hzPerSec 传 0 是非法值，直接忽略，保持原加速度不变。
+ *   只改运行期状态，断电复位后回到 CFG_SCURVE_ACCEL_HZ_PER_S。
+ * ------------------------------------------------------------------------ */
+void Motion_SetAccel(u32 hzPerSec)
+{
+    if (hzPerSec == 0)
+    {
+        return;
+    }
+
+    s_accel_hz_per_s = hzPerSec;
+}
+
+u32 Motion_GetAccel(void)
+{
+    return s_accel_hz_per_s;
 }

@@ -14,13 +14,18 @@
  *       Motion_Brake()                         停车：当前速度 S 曲线降到 0
  *
  *     这三个都是**阻塞**的完整动作：
- *        先用 S 曲线把速度过渡到目标（固定 CFG_SCURVE_TIME_MS = 800ms），
- *        再保持 holdMs 毫秒，然后返回。
+ *        先用 S 曲线把速度过渡到目标（时长 = 速度差 ÷ 加速度，
+ *        默认加速度 2000Hz/s 也就是"1000Hz 用 500ms"），
+ *        再保持 holdMs 毫秒，然后返回。变速时间不计入 holdMs。
  *     起始速度不用传 —— 本层内部记住"当前已下达的速度"，自动从那里过渡。
  *
  *  ② 底层接口（调试或需要自管过渡时用）
  *       Motion_Move(vLeft, vRight)             立即生效，不平滑
  *       Motion_GetSpeed(&l, &r)                读回当前已下达的速度
+ *
+ *  ③ 变速参数（运行时可调，不用重烧）
+ *       Motion_SetAccel(hzPerSec)              改加速度，对后续变速立即生效
+ *       Motion_GetAccel()                      读回当前加速度
  *
  * ⚠️ 速度单位是脉冲频率 Hz，不是 mm/s。
  *    左右各有一路定时器，所以左右可以不同（差速转向）；
@@ -47,5 +52,12 @@ void Motion_Move(s32 vLeft, s32 vRight);
 
 /* --- ② 底层：读回当前已下达的左右速度（Hz，有符号）；传 NULL 可忽略 --- */
 void Motion_GetSpeed(s32 *vLeft, s32 *vRight);
+
+/* --- ③ 加速度：hzPerSec = 2000 表示 1000Hz/500ms（默认值） ------------
+ *     变速时长 = |目标速度 - 当前速度| / hzPerSec；两侧取变化更大的一侧。
+ *     对调用之后的所有 Motion_Drive/Steer/Brake 立即生效；传 0 被忽略。
+ *     运行期修改，复位后回到 CFG_SCURVE_ACCEL_HZ_PER_S。 */
+void Motion_SetAccel(u32 hzPerSec);
+u32  Motion_GetAccel(void);
 
 #endif /* APP_MOTION_H */

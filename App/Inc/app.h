@@ -6,8 +6,8 @@
 /* ============================================================================
  * App 层 — 唯一知道"这是一台表型检测车"的地方
  *
- * 对 CubeMX 生成代码（Core/Src/main.c）暴露的全部接口就这两个函数：
- *     main() 里 USER CODE BEGIN 2  →  App_Init();
+ * 对 CubeMX 生成代码（Core/Src/main.c）暴露的接口：
+ *     main() 里 USER CODE BEGIN 2   →  App_Init();
  *     while(1) 的 USER CODE BEGIN 3 →  App_Loop();
  *
  * app_init.c 是**整个工程的唯一集成点**：它把 Bsp 的字节回调接到 Service 的

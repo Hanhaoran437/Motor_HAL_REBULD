@@ -47,8 +47,7 @@ void Bsp_MotorPulse_SetDir(MotorChannel ch, MotorDir dir);
  * ------------------------------------------------------------------------ */
 void Bsp_MotorPulse_SetFreq(MotorChannel ch, u32 hz);
 
-/* 启动/停止两路时基（所有通道一起） */
+/* 启动两路时基（所有通道一起）；要停某侧用 SetFreq(ch, 0) */
 void Bsp_MotorPulse_StartAll(void);
-void Bsp_MotorPulse_StopAll(void);
 
 #endif /* BSP_MOTOR_PULSE_H */

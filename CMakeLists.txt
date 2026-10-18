@@ -101,7 +101,6 @@ target_link_libraries(service PUBLIC bsp)
 add_library(app OBJECT
     App/Src/app_init.c
     App/Src/motion.c
-    App/Src/mission.c
 )
 target_include_directories(app PUBLIC
     ${CMAKE_SOURCE_DIR}/App/Inc

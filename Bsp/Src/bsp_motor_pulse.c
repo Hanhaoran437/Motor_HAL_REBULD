@@ -91,9 +91,3 @@ void Bsp_MotorPulse_StartAll(void)
     (void)HAL_TIM_Base_Start(BOARD_HTIM_LEFT);
     (void)HAL_TIM_Base_Start(BOARD_HTIM_RIGHT);
 }
-
-void Bsp_MotorPulse_StopAll(void)
-{
-    (void)HAL_TIM_Base_Stop(BOARD_HTIM_LEFT);
-    (void)HAL_TIM_Base_Stop(BOARD_HTIM_RIGHT);
-}
