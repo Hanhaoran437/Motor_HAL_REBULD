@@ -11,8 +11,11 @@
  * 任何地方都能改；现在收进本文件 static，只能用这两个 API 访问。
  * ============================================================================ */
 
-static u8  s_rx_buf[PROTOCOL_FRAME_MAX];
-static u16 s_rx_sta = 0;
+/* 中断写入、主循环读取：禁止优化器缓存状态或移动缓冲区访问。
+ * 完整帧取走前 ISR 不再写入缓冲区，主循环复制完成后才清状态。
+ */
+static volatile u8  s_rx_buf[PROTOCOL_FRAME_MAX];
+static volatile u16 s_rx_sta = 0;
 
 void Protocol_FeedByte(u8 byte)
 {

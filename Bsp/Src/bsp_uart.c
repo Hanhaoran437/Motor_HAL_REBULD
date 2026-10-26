@@ -16,6 +16,8 @@ static Bsp_Uart_RxByteHandler s_rx_handler = 0;             /* 上层注册的�
 
 void Bsp_Uart_RxStart(void)
 {
+    /* 丢弃启动接收前遗留的数据，同时清除 ORE/FE/NE/PE 标志。 */
+    __HAL_UART_CLEAR_OREFLAG(BOARD_HUART_HOST);
     HAL_UART_Receive_IT(BOARD_HUART_HOST, &s_rx_byte, 1);
 }
 
@@ -50,5 +52,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         /* 重新武装，准备收下一个字节 */
         HAL_UART_Receive_IT(BOARD_HUART_HOST, &s_rx_byte, 1);
+    }
+}
+
+/* ORE 会让 HAL 结束接收；只恢复接收方向，不影响正在进行的发送。
+ * 当前使用中断接收，没有 DMA，因此 AbortReceive 在这里不等待 DMA。
+ * 中断中不打印日志，避免阻塞接收和依赖更高层。
+ */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == BOARD_UART_HOST_INSTANCE)
+    {
+        HAL_UART_AbortReceive(huart);
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        HAL_UART_Receive_IT(huart, &s_rx_byte, 1);
     }
 }

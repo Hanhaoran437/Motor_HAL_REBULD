@@ -27,7 +27,8 @@
 #define BOARD_HTIM_RIGHT          (&htim2)
 
 /* ---------------------------------------------------------------------------
- * 串口：与上位机通信的那一路
+ * 串口：与上位机通信的那一路，USART1，PB6=TX / PB7=RX。
+ * GPIO 复用由 .ioc / Core/Src/usart.c 配置。
  * ------------------------------------------------------------------------ */
 #define BOARD_HUART_HOST          (&huart1)
 #define BOARD_UART_HOST_INSTANCE  USART1

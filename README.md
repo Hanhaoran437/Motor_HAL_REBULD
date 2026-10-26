@@ -7,7 +7,7 @@ STM32F407ZGT6 裸机（无 RTOS）四轮驱动工程：四路步进/脉冲输出
 > - 想快速跑起来 → **§4 快速上手**
 > - 想理解现有架构与每层边界 → §2 概览 + **§8 架构详解**
 > - 准备继续开发（上位机通信 / 深度相机 / 操作系统）→ 直接看 **§9 后续开发指南**
-> - 本文档目前描述的是**当前代码的真实状态**；§9 里的路线都**尚未动工**。
+> - 本文档描述当前代码；§9 是后续开发路线，其中 X1 串口错误恢复已补，仍需上板压测，其余事项见各项说明。
 
 ---
 
@@ -19,7 +19,7 @@ STM32F407ZGT6 裸机（无 RTOS）四轮驱动工程：四路步进/脉冲输出
 | 系统时钟 | 168 MHz（HSE 8 MHz → PLLM 8 / PLLN 336 / PLLP 2） |
 | 时基 | **TIM6 产生 1 ms 节拍**（`HAL_IncTick`），SysTick 中断为空 |
 | 构建 | CMake + Ninja + arm-none-eabi-gcc（`Debug` / `Release` 两个 preset） |
-| 串口 | USART1，115200 8N1，PA9=TX / PA10=RX |
+| 串口 | USART1，115200 8N1，PB6=TX / PB7=RX（AF7） |
 
 ### 定时器 / 引脚映射
 
@@ -175,11 +175,26 @@ Motion_SetAccel(4000);   /* 变速快一倍：0 → 2500Hz 用 625ms */
 
 ### 3.4 串口
 
+当前调试串口固定为 **USART1：PB6=TX、PB7=RX**，对应本核心板 **J3 第4脚、第3脚**。
+外部串口的 RX 接 PB6，TX 接 PB7，并共地。PB6/PB7 专用于串口，不接摄像头对应信号。
+旧 PA9/PA10 保留为无上下拉的普通输入；板载 CH340G 与 J5（PA9/PA10）不作为本版固件的调试串口。
+
 - **接收**：USART1 中断逐字节收，`HAL_UART_RxCpltCallback` → `Protocol_FeedByte()` 组帧。
-  帧规则：**以 `0x0D 0x0A`（回车 + 换行）结尾**，最长 `PROTOCOL_FRAME_MAX`（200）字节。
+  帧规则：**以 `0x0D 0x0A`（回车 + 换行）结尾**，缓冲区 `PROTOCOL_FRAME_MAX`（200）字节，正文最多 199 字节。
 - **回显**：`App_Loop()` 取到完整帧后打印 `RX: <内容>`。目前**没有命令解析**（`app_init.c` 里是 TODO），收到什么只回显什么。
 - **发送**：`LOG("...")` → `printf` → `__io_putchar()` → `Bsp_Uart_SendByte()`（阻塞发送，不占中断）。
 - 主循环里上一帧没被取走时，新来的字节会被丢弃（不排队）。
+- **启动提示**：复位后直接发送 `BOOT: USART1 115200 8N1, TX=PB6 RX=PB7`；六段动作结束后输出 `UART ready`，再测试收帧回显。日志设为无缓冲输出。
+- **错误恢复**：`HAL_UART_ErrorCallback()` 中终止当前中断接收、清错误标志、重新开启单字节接收；不在中断中打印。出错当时的数据仍可能丢失。
+
+串口助手设为 **115200 / 8N1 / 无流控**，关闭本地回显，启用发送末尾追加 **CRLF**。等待 `UART ready` 后发送 `hello`，应收到 `RX: hello`。
+也可用十六进制模式发送 `68 65 6C 6C 6F 0D 0A`，排除结束符设置问题。
+若复位后连 `BOOT` 都没有，先检查 PB6 → 转串口 RX、PB7 ← 转串口 TX、共地、COM 口和固件是否正在运行（F5 停在 main 时需继续运行）。若有 `BOOT` 却没有 `UART ready`，检查演示动作是否完成及程序是否停在断点。
+
+源码配置正确但板上没有输出时，还需确认烧录的是当前固件：`build/Debug/Motor_HAL_REBULD.elf`。
+F5 选择“无线调试器：下载并调试”，而“仅连接（不烧录）”不会更新 Flash。
+曾实测发现板上运行旧 PA9/PA10 固件、与当前 ELF 的 `.text` 段不匹配；重新烧录后，XCOM V2.2 正常显示 PB6/PB7 启动提示及 `RX: hello`。
+使用 XCOM 时发送框只填 `hello`，勾选“发送新行”；文本模式下手写 `0D 0A` 是普通字符，不是回车换行字节。
 
 ```c
 LOG("boot ok, clk=%lu\r\n", (unsigned long)SystemCoreClock);   /* 任意位置都能用 */
@@ -192,7 +207,7 @@ LOG("boot ok, clk=%lu\r\n", (unsigned long)SystemCoreClock);   /* 任意位置�
 | 串口命令解析 | `App/Src/app_init.c` 里是 TODO，收帧只回显 |
 | 闭环/编码器 | 无，纯开环脉冲输出 |
 | 驱动器使能引脚 | 无，需硬件接死 |
-| 串口错误恢复 | 没有 `HAL_UART_ErrorCallback`。发生 ORE/FE 溢出后 HAL 不再重新武装接收，**串口会静默失聪直到复位** |
+| 串口错误恢复 | 已补 `HAL_UART_ErrorCallback`，可重新开启中断接收；尚需上板压测，出错时的数据不保证保留 |
 | 故障现场 | `Error_Handler()`（`main.c`）和 `HardFault_Handler()`（`stm32f4xx_it.c`）都是 `while(1)`，无输出 |
 | 栈余量 | 链接脚本 `_Min_Stack_Size` 只有 0x400（1 KB），`printf` 用 `nano.specs` 格式化浮点时注意 |
 | 多路串口 | `HAL_UART_RxCpltCallback` 是全工程唯一强定义，且**硬编码只认 USART1**；加第二路串口必须先改这里 |
@@ -210,7 +225,7 @@ LOG("boot ok, clk=%lu\r\n", (unsigned long)SystemCoreClock);   /* 任意位置�
    - **CMSIS-DAP 无线调试器**（正点原子 ATK-HSWLDBG）：OpenOCD 必须放在
      `<工作区>\tools\openocd\bin\openocd.exe`（`scripts/` 与 `bin/` 平级）。工程已自带。
    - **ST-LINK**：装 ST-LINK GDB Server 扩展，另建一条 launch 配置。
-3. **串口工具**（波特率 115200），接 PA9/PA10 与 GND。
+3. **串口工具**（波特率 115200），RX 接 PB6、TX 接 PB7，并连接 GND。
 
 ### 4.2 编译
 
@@ -247,7 +262,7 @@ F5 选 **“无线调试器：下载并调试（OpenOCD + CMSIS-DAP）”**：�
 ### 4.4 跑起来看什么
 
 1. 上电 13.25 秒内电机依次执行：前进 → 左转 → 回正 → 前进 → 倒车 → 停车。
-2. 串口每隔一段收到 `RX: ...`（你发什么它就回什么）。
+2. 复位后串口收到 `BOOT: ...`；演示结束收到 `UART ready`，再发送以 CRLF 结尾的文字，收到 `RX: ...`。
 3. 用示波器/逻辑分析仪夹 PE9，段 1 的保持期应看到 **2500 Hz 方波，周期 400 µs、高电平 200 µs**。
 
 ### 4.5 改一版自己试
@@ -269,7 +284,7 @@ F5 选 **“无线调试器：下载并调试（OpenOCD + CMSIS-DAP）”**：�
 | 改了主频，转速整体偏快/偏慢 | `cfg_motor.h` 的 `CFG_TIM1_CLK_HZ` / `CFG_TIM2_CLK_HZ` 没跟 `SystemClock_Config()` 同步，PSC 算错但代码不报错 |
 | 先 `SetFreq()` 再 `StartAll()`，某侧用旧分频跑起来 | 必须**先 `Bsp_MotorPulse_StartAll()` 再 `SetFreq()`**（`SetFreq(0)` 会停掉整侧时基） |
 | 改了一次频率就没脉冲输出 | 同侧两路共用定时器，改其中一路会连带改掉另一路；停车用 `SetFreq(ch, 0)` |
-| 串口发了没反应 | ① 帧必须以 `0x0D 0x0A` 结尾；② 上电演示期间是阻塞的，回显会延后；③ 发生过 ORE 溢出（见已知限制） |
+| 串口发了没反应 | ① 确认收到 `BOOT` 和 `UART ready`；② 发送必须以 `0x0D 0x0A` 结尾；③ 检查 TX/RX 交叉接线、共地和 COM 口；④ F5 停在 main 或断点时需继续运行 |
 | 只改 `Core/` 之外的代码，重新生成 CubeMX 后改动丢失 | 业务代码不要写进 CubeMX 会覆盖的区域，只写 `USER CODE BEGIN/END` 之间 |
 | 命令行 `ninja` 卡死 | 中文路径 + `cmd.exe` 包装，见 4.2 的警告 |
 | 加了自己的 `.c` 文件，编译通过但功能没生效 | 没把它加进 `CMakeLists.txt` 里对应层的 OBJECT 库源列表——**链接期会静默丢弃，不报错**。见 §9.3 |
@@ -464,7 +479,7 @@ u32  Osal_GetTickMs(void);
 | 5 | 帧必须以 `0x0D 0x0A` **两个字节**收尾 | `protocol.c` 的状态机（先记 `0x0D`，等 `0x0A`） | 只发 `0x0D` 不会成帧，帧会一直挂着 |
 | 6 | 上一帧未被 `TakeFrame()` 取走时，新字节**直接丢弃、不排队** | `protocol.c` 的状态字逻辑 | 上位机连发命令会丢帧 |
 | 7 | `Protocol_FeedByte()` 在**中断上下文**运行 | `bsp_uart.c` 回调 → `Protocol_FeedByte()` | 里面若有阻塞/睡眠调用，裸机会卡死，上 RTOS 会断言 |
-| 8 | **没有** `HAL_UART_ErrorCallback` | `bsp_uart.c` 全文件 | 发生 ORE/FE 溢出后 HAL 不再重新武装接收，**串口静默失聪直到复位** |
+| 8 | `HAL_UART_ErrorCallback` 负责恢复中断接收，不打印日志 | `bsp_uart.c` 错误回调 | 只能恢复后续接收，无法补回出错或溢出时丢失的字节 |
 | 9 | 生效的 NVIC 优先级分组是 **GROUP_2**（不是 GROUP_4） | `HAL_Init()` 先设 GROUP_4，随后 `HAL_MspInit()` 覆盖为 GROUP_2 | 只有 0~3 级抢占优先级；上 FreeRTOS 会触发 `vPortValidateInterruptPriority()` 断言 |
 | 10 | HAL 时基是 **TIM6**（1 ms），`SysTick_Handler()` 是**空的** | `stm32f4xx_hal_timebase_tim.c` + `stm32f4xx_it.c` | 这其实是好事：`SysTick` 可以干净地让给 RTOS。但别以为 `HAL_Delay` 用的是 SysTick |
 | 11 | 上电六段演示写在 `main()` 里、`App_Loop()` 之前 | `Core/Src/main.c` USER CODE 2 段 | 裸机成立；上 RTOS 后这段会跑在 `osKernelStart()` 之前，**必须搬进任务**（见 §9.7 R4） |
@@ -490,7 +505,7 @@ u32  Osal_GetTickMs(void);
 
 | 短板 | 影响 |
 |---|---|
-| 无串口错误回调 | ORE 后静默失聪，是最该先补的一条（§9.4 X1） |
+| 串口错误恢复尚未上板压测 | 已补错误回调，仍需验证 ORE 等错误后的持续接收（§9.4 X1） |
 | 串口回调不可扩展 | 单回调 + 硬编码 USART1，加第二路必须先重构（§9.4 X2） |
 | 无命令解析 | 上位机现在只能「发什么收什么」，没有控制能力（§9.5） |
 | 收帧不排队 | 连发命令丢帧（§9.5 需一并决定策略） |
@@ -577,7 +592,7 @@ u32  Osal_GetTickMs(void);
 
 | 编号 | 项 | 落点 | 动作 | 风险 | 验收 |
 |---|---|---|---|---|---|
-| X1 | **补 `HAL_UART_ErrorCallback`** | `Bsp/Src/bsp_uart.c` | 清 ORE/FE/NE/PE 标志，并重新武装 `HAL_UART_Receive_IT()` | 低 | 串口压测 10 万帧后仍不失聪（当前 ORE 后会静默失聪到复位） |
+| X1 | **`HAL_UART_ErrorCallback` 已补，待上板压测** | `Bsp/Src/bsp_uart.c` | 终止当前接收，清 ORE/FE/NE/PE 标志，并重新武装 `HAL_UART_Receive_IT()` | 低 | 错误注入及 10 万帧压测后仍能继续接收 |
 | X2 | **串口回调按 `Instance` 分发** | `Bsp/Src/bsp_uart.c` 回调处 | 改为注册表：`Bsp_Uart_RegisterRxHandler(instance, handler)`，或在回调里 if/else 分发 | 低 | 两路串口各自收自己的字节，互不抢占 |
 | X3 | **NVIC 分组改 GROUP_4** | `.ioc` 的 NVIC 分组设置，或 `Core/Src/stm32f4xx_hal_msp.c` | 4 位全部用作抢占优先级 | **中**（现有 USART1 是 3/3，改完要重算） | 中断仍正常；上 RTOS 后 `configASSERT` 不触发 |
 | X4 | `Protocol_TakeFrame()` 返回类型 | `Service/Inc/protocol.h` + `protocol.c` | `u16` → `u8`（语义本来就是 1/0） | 低 | 编译通过，调用点无告警 |
@@ -601,9 +616,9 @@ u32  Osal_GetTickMs(void);
 
 **注意事项**
 
-- ⚠️ **H1 之前必须先做 X1**。没有错误恢复的串口接上位机长期跑，ORE 溢出是必然事件。
+- ⚠️ **H1 之前必须先完成 X1 的上板验证**。错误恢复代码已补，仍需确认真实硬件上的持续接收。
 - ⚠️ **收帧不排队**（契约 6）：上位机连发命令会丢帧。H1 里要一并决定：加环形队列，还是约定「收到应答再发下一条」。
-- ⚠️ 帧长上限 200 字节（`PROTOCOL_FRAME_MAX`）。若上位机要传长数据（如坐标数组），要么提高上限，要么另开一种帧类型。
+- ⚠️ 缓冲区为 200 字节（`PROTOCOL_FRAME_MAX`），正文上限为 199 字节。若上位机要传长数据（如坐标数组），要么提高上限，要么另开一种帧类型。
 - 💡 若担心阻塞发送影响实时性，可考虑后续把发送也做成中断/DMA（本阶段不必）。
 
 ### 9.6 路线二：深度相机
