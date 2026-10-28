@@ -53,6 +53,14 @@ void Motion_Move(s32 vLeft, s32 vRight);
 /* --- ② 底层：读回当前已下达的左右速度（Hz，有符号）；传 NULL 可忽略 --- */
 void Motion_GetSpeed(s32 *vLeft, s32 *vRight);
 
+/* Remote path: set a target and call Tick regularly. Rate limited (Hz/s),
+ * nonblocking; each side reaches zero before reversing. Do not mix legacy
+ * blocking Drive/Steer/Brake calls into the remote main loop. */
+void Motion_SetTarget(s32 vLeft, s32 vRight);
+void Motion_Tick(u32 nowMs);
+/* Disable pulses immediately; clears targets so an old command cannot resume. */
+void Motion_StopImmediate(void);
+
 /* --- ③ 加速度：hzPerSec = 2000 表示 1000Hz/500ms（默认值） ------------
  *     变速时长 = |目标速度 - 当前速度| / hzPerSec；两侧取变化更大的一侧。
  *     对调用之后的所有 Motion_Drive/Steer/Brake 立即生效；传 0 被忽略。

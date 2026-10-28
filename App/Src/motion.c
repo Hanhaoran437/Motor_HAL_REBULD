@@ -49,9 +49,13 @@ static const u16 s_scurve_table[CFG_SCURVE_POINTS] = {
     1000
 };
 
-/* 当前已下达的左右速度（Hz，有符号）。改硬件的地方只有 Motion_Move()。 */
+/* 当前已下达的左右速度（Hz，有符号）。Move 正常更新，StopImmediate 清零。 */
 static s32 s_speed_left  = 0;
 static s32 s_speed_right = 0;
+static s32 s_target_left = 0;
+static s32 s_target_right = 0;
+static u32 s_tick_ms;
+static u32 s_step_fraction;
 
 /* 当前加速度（Hz/s）。S 曲线变速时长 = |速度差| / s_accel_hz_per_s。
  * 默认 2000 == "1000Hz 用 500ms"；运行时可调，见 Motion_SetAccel()。 */
@@ -60,11 +64,15 @@ static u32 s_accel_hz_per_s = CFG_SCURVE_ACCEL_HZ_PER_S;
 void Motion_Init(void)
 {
     /* 时钟、GPIO、AF 复用、时基、PWM 通道全部由 CubeMX 生成代码完成，
-     * Bsp 只负责打开 4 个通道输出并保持两路定时器停止。 */
+     * Bsp 保持 4 个通道及两路计数器停止，首次非零目标才启动。 */
     Bsp_MotorPulse_Init();
 
     s_speed_left  = 0;
     s_speed_right = 0;
+    s_target_left = 0;
+    s_target_right = 0;
+    s_tick_ms = Osal_GetTickMs();
+    s_step_fraction = 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -76,16 +84,23 @@ void Motion_Move(s32 vLeft, s32 vRight)
     u32 fl = (vLeft  < 0) ? (u32)(-vLeft)  : (u32)vLeft;
     u32 fr = (vRight < 0) ? (u32)(-vRight) : (u32)vRight;
 
-    /* 先定方向（此时可能还在转，由 S 曲线保证过零前已减速） */
+    /* Stop pulses before changing direction or stopping a side. */
+    if (s_speed_left != 0 && (vLeft == 0 || ((s_speed_left < 0) != (vLeft < 0))))
+    {
+        Bsp_MotorPulse_SetFreq(MOTION_CH_FL, 0);
+    }
+    if (s_speed_right != 0 && (vRight == 0 || ((s_speed_right < 0) != (vRight < 0))))
+    {
+        Bsp_MotorPulse_SetFreq(MOTION_CH_FR, 0);
+    }
+
+    /* 先定方向，再加载频率并启动对应一侧。 */
     Bsp_MotorPulse_SetDir(MOTION_CH_FL, (vLeft  < 0) ? MOTION_DIR_LEFT_BWD  : MOTION_DIR_LEFT_FWD);
     Bsp_MotorPulse_SetDir(MOTION_CH_RL, (vLeft  < 0) ? MOTION_DIR_LEFT_BWD  : MOTION_DIR_LEFT_FWD);
     Bsp_MotorPulse_SetDir(MOTION_CH_FR, (vRight < 0) ? MOTION_DIR_RIGHT_BWD : MOTION_DIR_RIGHT_FWD);
     Bsp_MotorPulse_SetDir(MOTION_CH_RR, (vRight < 0) ? MOTION_DIR_RIGHT_BWD : MOTION_DIR_RIGHT_FWD);
 
-    /* ⚠️ 顺序硬约束：必须先 StartAll() 再 SetFreq()。
-     * 因为 SetFreq(0) 会 HAL_TIM_Base_Stop() 掉整路时基；
-     * 若先 SetFreq 再 StartAll，会把本该停转的一侧用旧分频重新启动。 */
-    Bsp_MotorPulse_StartAll();
+    /* SetFreq starts only its own nonzero side; a zero side remains stopped. */
     Bsp_MotorPulse_SetFreq(MOTION_CH_FL, fl);          /* 左侧（FL/RL 共用 TIM1） */
     Bsp_MotorPulse_SetFreq(MOTION_CH_FR, fr);          /* 右侧（FR/RR 共用 TIM2） */
 
@@ -208,4 +223,57 @@ void Motion_SetAccel(u32 hzPerSec)
 u32 Motion_GetAccel(void)
 {
     return s_accel_hz_per_s;
+}
+
+static s32 Motion_ClampTarget(s32 speed)
+{
+    if (speed > (s32)CFG_PUL_MAX_HZ) { return (s32)CFG_PUL_MAX_HZ; }
+    if (speed < -(s32)CFG_PUL_MAX_HZ) { return -(s32)CFG_PUL_MAX_HZ; }
+    return speed;
+}
+
+void Motion_SetTarget(s32 vLeft, s32 vRight)
+{
+    s_target_left = Motion_ClampTarget(vLeft);
+    s_target_right = Motion_ClampTarget(vRight);
+}
+
+static s32 Motion_Step(s32 current, s32 target, s32 step)
+{
+    /* Never jump from positive to negative pulses in one update. */
+    if ((current > 0 && target < 0) || (current < 0 && target > 0)) { target = 0; }
+    if (current < target) { return (target - current <= step) ? target : current + step; }
+    if (current > target) { return (current - target <= step) ? target : current - step; }
+    return current;
+}
+
+void Motion_Tick(u32 nowMs)
+{
+    u32 elapsed = nowMs - s_tick_ms;
+    uint64_t credit;
+    u32 step;
+    s32 left;
+    s32 right;
+    if (elapsed < CFG_SCURVE_SAMPLE_MS) { return; }
+    s_tick_ms = nowMs;
+    if (elapsed > CFG_MOTION_MAX_TICK_MS) { elapsed = CFG_MOTION_MAX_TICK_MS; }
+    credit = (uint64_t)s_accel_hz_per_s * elapsed + s_step_fraction;
+    step = (u32)(credit / 1000U);
+    s_step_fraction = (u32)(credit % 1000U);
+    if (step > 2U * CFG_PUL_MAX_HZ) { step = 2U * CFG_PUL_MAX_HZ; }
+    left = Motion_Step(s_speed_left, s_target_left, (s32)step);
+    right = Motion_Step(s_speed_right, s_target_right, (s32)step);
+    if (left != s_speed_left || right != s_speed_right) { Motion_Move(left, right); }
+}
+
+void Motion_StopImmediate(void)
+{
+    Bsp_MotorPulse_SetFreq(MOTION_CH_FL, 0);
+    Bsp_MotorPulse_SetFreq(MOTION_CH_FR, 0);
+    s_speed_left = 0;
+    s_speed_right = 0;
+    s_target_left = 0;
+    s_target_right = 0;
+    s_step_fraction = 0;
+    s_tick_ms = Osal_GetTickMs();
 }

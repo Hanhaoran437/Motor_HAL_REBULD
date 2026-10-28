@@ -13,6 +13,9 @@
 
 static u8 s_rx_byte;                                       /* HAL 逐字节接收暂存 */
 static Bsp_Uart_RxByteHandler s_rx_handler = 0;             /* 上层注册的字节处理器 */
+static u8 s_rc_rx_byte;
+static Bsp_Uart_RxByteHandler s_rc_rx_handler = 0;
+static volatile u32 s_rc_error_count;
 
 void Bsp_Uart_RxStart(void)
 {
@@ -24,6 +27,22 @@ void Bsp_Uart_RxStart(void)
 void Bsp_Uart_SetRxByteHandler(Bsp_Uart_RxByteHandler handler)
 {
     s_rx_handler = handler;
+}
+
+void Bsp_Uart_RcRxStart(void)
+{
+    __HAL_UART_CLEAR_OREFLAG(BOARD_HUART_RC);
+    HAL_UART_Receive_IT(BOARD_HUART_RC, &s_rc_rx_byte, 1);
+}
+
+void Bsp_Uart_RcSetRxByteHandler(Bsp_Uart_RxByteHandler handler)
+{
+    s_rc_rx_handler = handler;
+}
+
+u32 Bsp_Uart_RcGetErrorCount(void)
+{
+    return s_rc_error_count;
 }
 
 void Bsp_Uart_SendByte(u8 byte)
@@ -53,6 +72,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         /* 重新武装，准备收下一个字节 */
         HAL_UART_Receive_IT(BOARD_HUART_HOST, &s_rx_byte, 1);
     }
+    else if (huart->Instance == BOARD_UART_RC_INSTANCE)
+    {
+        if (s_rc_rx_handler != 0) { s_rc_rx_handler(s_rc_rx_byte); }
+        HAL_UART_Receive_IT(BOARD_HUART_RC, &s_rc_rx_byte, 1);
+    }
 }
 
 /* ORE 会让 HAL 结束接收；只恢复接收方向，不影响正在进行的发送。
@@ -66,5 +90,12 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         HAL_UART_AbortReceive(huart);
         __HAL_UART_CLEAR_OREFLAG(huart);
         HAL_UART_Receive_IT(huart, &s_rx_byte, 1);
+    }
+    else if (huart->Instance == BOARD_UART_RC_INSTANCE)
+    {
+        ++s_rc_error_count;
+        HAL_UART_AbortReceive(huart);
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        HAL_UART_Receive_IT(huart, &s_rc_rx_byte, 1);
     }
 }

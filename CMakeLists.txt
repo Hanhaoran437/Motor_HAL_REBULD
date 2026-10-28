@@ -90,6 +90,7 @@ target_link_libraries(bsp PUBLIC osal)
 # ---- Service：与业务无关的工具箱（帧协议 / 日志）----
 add_library(service OBJECT
     Service/Src/protocol.c
+    Service/Src/ibus.c
     Service/Src/log.c
 )
 target_include_directories(service PUBLIC
@@ -101,6 +102,7 @@ target_link_libraries(service PUBLIC bsp)
 add_library(app OBJECT
     App/Src/app_init.c
     App/Src/motion.c
+    App/Src/rc_control.c
 )
 target_include_directories(app PUBLIC
     ${CMAKE_SOURCE_DIR}/App/Inc

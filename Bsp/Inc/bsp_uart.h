@@ -4,7 +4,7 @@
 #include "types.h"
 
 /* ============================================================================
- * 串口（与上位机通信）— 只负责"把收到的字节交给上层"，
+ * 串口（USART1 调试 + USART3 遥控）— 只负责"把收到的字节交给上层"，
  * 不解析协议、不组帧（那是 Service 层 protocol.c 的事）。
  *
  * ⚠️ 绝不能再自己定义 USART1_IRQHandler！
@@ -17,6 +17,11 @@ typedef void (*Bsp_Uart_RxByteHandler)(u8 byte);
 
 void Bsp_Uart_RxStart(void);                                   /* 启动中断接收 */
 void Bsp_Uart_SetRxByteHandler(Bsp_Uart_RxByteHandler handler); /* 注册回调 */
+
+/* Independent USART3 receiver. Same byte-only callback, no protocol coupling. */
+void Bsp_Uart_RcRxStart(void);
+void Bsp_Uart_RcSetRxByteHandler(Bsp_Uart_RxByteHandler handler);
+u32  Bsp_Uart_RcGetErrorCount(void);
 
 /* --- 发送 ---------------------------------------------------------------
  * 上层（Service 的 log.c 里 __io_putchar / 以后协议回包）只调这两个函数，

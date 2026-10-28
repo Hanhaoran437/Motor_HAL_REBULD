@@ -26,8 +26,8 @@ typedef enum
 } MotorDir;
 
 /* ---------------------------------------------------------------------------
- * 初始化：打开 4 路 PWM 通道 + 高级定时器 TIM1 的主输出(MOE)，
- *         然后保持两路定时器停止，等 Bsp_MotorPulse_StartAll() 启动。
+ * 初始化：打开高级定时器 TIM1 的主输出(MOE)，4 路 PWM 通道和计数器保持关闭，
+ *         等待 SetFreq(ch, nonzero) 启动对应一侧。
  *         （时钟、GPIO、AF 复用、时基、PWM 占空比全部由 CubeMX 生成代码完成）
  * ------------------------------------------------------------------------ */
 void Bsp_MotorPulse_Init(void);
@@ -41,13 +41,12 @@ void Bsp_MotorPulse_SetDir(MotorChannel ch, MotorDir dir);
  * ⚠️ 同侧两路共用一路定时器时基：设 L1 也会把 L2 的频率改掉（反之亦然），
  *    这是硬件决定的，不是 bug。想左右频率不同 → 左右各给一次即可。
  *
- * ⚠️⚠️ 调用顺序有硬约束：**必须先 Bsp_MotorPulse_StartAll() 再 SetFreq()**。
- *    因为 SetFreq(0) 会 HAL_TIM_Base_Stop() 掉整路时基；如果先 SetFreq 再
- *    StartAll，会把本该停转的那一侧用旧分频值重新启动。
+ * 非零频率先加载分频、再启动该侧；零频率停止该侧。
+ * 不需要先调用 StartAll，避免短暂重启另一侧已停止的电机。
  * ------------------------------------------------------------------------ */
 void Bsp_MotorPulse_SetFreq(MotorChannel ch, u32 hz);
 
-/* 启动两路时基（所有通道一起）；要停某侧用 SetFreq(ch, 0) */
+/* 旧接口：无条件启动两侧。遥控路径不调用；停车用 SetFreq(ch, 0)。 */
 void Bsp_MotorPulse_StartAll(void);
 
 #endif /* BSP_MOTOR_PULSE_H */

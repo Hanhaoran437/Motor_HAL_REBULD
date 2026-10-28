@@ -13,4 +13,7 @@
 #define CFG_SCURVE_SAMPLE_MS  8     /* 采样间隔：每 8ms 更新一次输出速度 */
 #define CFG_SCURVE_MIN_MS    20     /* 变速时长下限，防止微小速度差也走长流程 */
 
+/* Nonblocking remote path: bound a late tick to prevent a large speed jump. */
+#define CFG_MOTION_MAX_TICK_MS 20U
+
 #endif /* CFG_MOTION_H */

@@ -25,7 +25,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app.h"          /* App 层唯一入口: App_Init() / App_Loop() */
-#include "motion.h"       /* 运动学 API: Motion_Drive / Motion_Steer / Motion_Brake */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -92,19 +91,9 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_USART1_UART_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  App_Init();                 /* 串口接收 + 四电机初始化（全部在 App 层） */
-
-  /* 六段动作：所有变速都走 S 曲线（斜率 = CFG_SCURVE_ACCEL_HZ_PER_S，
-   * 默认 2000Hz/s，即 0→2500Hz 用 1250ms），到达目标后再保持指定毫秒数。
-   * 变速过程中消耗的时间不算在保持时间里。
-   * 每段参数：Motion_Drive(速度, 保持ms) / Motion_Steer(左, 右, 保持ms) */
-  Motion_Drive( 2500,          1000);   /* 1) 从零起步：直行加速到 2500Hz，保持 1s */
-  Motion_Steer( 1000,  2500,   1000);   /* 2) 左转：左轮 1000Hz、右轮 2500Hz，保持 1s */
-  Motion_Steer( 2500,  1000,   1000);   /* 3) 回正：左轮 2500Hz、右轮 1000Hz，保持 1s */
-  Motion_Drive( 2500,          1000);   /* 4) 前进：回到两侧 2500Hz，保持 1s */
-  Motion_Drive(-2500,          2000);   /* 5) 减速后退：穿零换向到 -2500Hz，保持 2s */
-  Motion_Brake();                       /* 6) 停车：两侧 S 曲线降到 0 */
+  App_Init();                 /* 上电保持停车；遥控状态机在 App_Loop 中推进。 */
   /* USER CODE END 2 */
 
   /* Infinite loop */

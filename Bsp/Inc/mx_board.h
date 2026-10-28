@@ -33,6 +33,10 @@
 #define BOARD_HUART_HOST          (&huart1)
 #define BOARD_UART_HOST_INSTANCE  USART1
 
+/* FS-iA6B SERVO i-BUS -> PB11, USART3 RX only (AF7). PB10 stays unused. */
+#define BOARD_HUART_RC            (&huart3)
+#define BOARD_UART_RC_INSTANCE    USART3
+
 /* ---------------------------------------------------------------------------
  * PUL 脉冲输出引脚（AF 复用）
  *
